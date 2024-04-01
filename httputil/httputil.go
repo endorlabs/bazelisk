@@ -205,8 +205,6 @@ func DownloadBinary(originURL, destDir, destFile string, config config.Config) (
 			return "", err
 		}
 
-		log.Printf("Downloading %s...", originURL)
-
 		var auth string = ""
 		t, err := tryFindNetrcFileCreds(u.Host)
 		if err == nil {

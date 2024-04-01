@@ -5,6 +5,7 @@ package core
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
@@ -73,21 +74,23 @@ func MakeDefaultConfig() config.Config {
 	return config.Layered(configs...)
 }
 
-// RunBazelisk runs the main Bazelisk logic for the given arguments and Bazel repositories.
-func RunBazelisk(args []string, repos *Repositories) (int, error) {
-	return RunBazeliskWithArgsFunc(func(_ string) []string { return args }, repos)
-}
+// RunBazelisk runs the main Bazelisk logic for the given ArgsFunc, Bazel
+// repositories and stdout/stderr.
+func RunBazelisk(argsFunc ArgsFunc, repos *Repositories) (int, string, string, error) {
 
-// RunBazeliskWithArgsFunc runs the main Bazelisk logic for the given ArgsFunc and Bazel
-// repositories.
-func RunBazeliskWithArgsFunc(argsFunc ArgsFunc, repos *Repositories) (int, error) {
+	var outb, errb bytes.Buffer
 
-	return RunBazeliskWithArgsFuncAndConfig(argsFunc, repos, MakeDefaultConfig())
+	exitCode, err := RunBazeliskWithArgsFuncAndConfig(argsFunc, repos, MakeDefaultConfig(), &outb, &errb)
+	if err != nil {
+		return exitCode, "", "", err
+	}
+
+	return exitCode, outb.String(), errb.String(), err
 }
 
 // RunBazeliskWithArgsFuncAndConfig runs the main Bazelisk logic for the given ArgsFunc and Bazel
 // repositories and config.
-func RunBazeliskWithArgsFuncAndConfig(argsFunc ArgsFunc, repos *Repositories, config config.Config) (int, error) {
+func RunBazeliskWithArgsFuncAndConfig(argsFunc ArgsFunc, repos *Repositories, config config.Config, outb *bytes.Buffer, errb *bytes.Buffer) (int, error) {
 
 	userAgentOnce.Do(func() {
 		httputil.UserAgent = getUserAgent(config)
@@ -142,7 +145,7 @@ func RunBazeliskWithArgsFuncAndConfig(argsFunc ArgsFunc, repos *Repositories, co
 	// --print_env must be the first argument.
 	if len(args) > 0 && args[0] == "--print_env" {
 		// print environment variables for sub-processes
-		cmd := makeBazelCmd(bazelPath, args, nil, config)
+		cmd := makeBazelCmd(bazelPath, args, config, nil, nil)
 		for _, val := range cmd.Env {
 			fmt.Println(val)
 		}
@@ -200,7 +203,7 @@ func RunBazeliskWithArgsFuncAndConfig(argsFunc ArgsFunc, repos *Repositories, co
 		}
 	}
 
-	exitCode, err := runBazel(bazelPath, args, nil, config)
+	exitCode, err := runBazel(bazelPath, args, config, outb, errb)
 	if err != nil {
 		return -1, fmt.Errorf("could not run Bazel: %v", err)
 	}
@@ -547,7 +550,7 @@ func prependDirToPathList(cmd *exec.Cmd, dir string) {
 	}
 }
 
-func makeBazelCmd(bazel string, args []string, out io.Writer, config config.Config) *exec.Cmd {
+func makeBazelCmd(bazel string, args []string, config config.Config, outb *bytes.Buffer, errb *bytes.Buffer) *exec.Cmd {
 	execPath := maybeDelegateToWrapper(bazel, config)
 
 	cmd := exec.Command(execPath, args...)
@@ -557,17 +560,14 @@ func makeBazelCmd(bazel string, args []string, out io.Writer, config config.Conf
 	}
 	prependDirToPathList(cmd, filepath.Dir(execPath))
 	cmd.Stdin = os.Stdin
-	if out == nil {
-		cmd.Stdout = os.Stdout
-	} else {
-		cmd.Stdout = out
-	}
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = outb
+	cmd.Stderr = errb
+
 	return cmd
 }
 
-func runBazel(bazel string, args []string, out io.Writer, config config.Config) (int, error) {
-	cmd := makeBazelCmd(bazel, args, out, config)
+func runBazel(bazel string, args []string, config config.Config, outb *bytes.Buffer, errb *bytes.Buffer) (int, error) {
+	cmd := makeBazelCmd(bazel, args, config, outb, errb)
 	err := cmd.Start()
 	if err != nil {
 		return 1, fmt.Errorf("could not start Bazel: %v", err)
@@ -602,8 +602,8 @@ func getIncompatibleFlags(bazelPath, cmd string, config config.Config) ([]string
 		return strings.Split(incompatibleFlagsStr, ","), nil
 	}
 
-	out := strings.Builder{}
-	if _, err := runBazel(bazelPath, []string{"help", cmd, "--short"}, &out, config); err != nil {
+	out := bytes.Buffer{}
+	if _, err := runBazel(bazelPath, []string{"help", cmd, "--short"}, config, &out, nil); err != nil {
 		return nil, fmt.Errorf("unable to determine incompatible flags with binary %s: %v", bazelPath, err)
 	}
 
@@ -679,7 +679,7 @@ func shutdownIfNeeded(bazelPath string, startupOptions []string, config config.C
 
 	args := append(startupOptions, "shutdown")
 	fmt.Printf("bazel %s\n", strings.Join(args, " "))
-	exitCode, err := runBazel(bazelPath, args, nil, config)
+	exitCode, err := runBazel(bazelPath, args, config, nil, nil)
 	fmt.Printf("\n")
 	if err != nil {
 		log.Fatalf("failed to run bazel shutdown: %v", err)
@@ -698,7 +698,7 @@ func cleanIfNeeded(bazelPath string, startupOptions []string, config config.Conf
 
 	args := append(startupOptions, "clean", "--expunge")
 	fmt.Printf("bazel %s\n", strings.Join(args, " "))
-	exitCode, err := runBazel(bazelPath, args, nil, config)
+	exitCode, err := runBazel(bazelPath, args, config, nil, nil)
 	fmt.Printf("\n")
 	if err != nil {
 		log.Fatalf("failed to run clean: %v", err)
@@ -870,7 +870,7 @@ func testWithBazelAtCommit(bazelCommit string, args []string, bazeliskHome strin
 	shutdownIfNeeded(bazelPath, startupOptions, config)
 	cleanIfNeeded(bazelPath, startupOptions, config)
 	fmt.Printf("bazel %s\n", strings.Join(args, " "))
-	bazelExitCode, err := runBazel(bazelPath, args, nil, config)
+	bazelExitCode, err := runBazel(bazelPath, args, config, nil, nil)
 	if err != nil {
 		return -1, fmt.Errorf("could not run Bazel: %v", err)
 	}
@@ -887,7 +887,7 @@ func migrate(bazelPath string, baseArgs []string, flags []string, config config.
 	shutdownIfNeeded(bazelPath, startupOptions, config)
 	cleanIfNeeded(bazelPath, startupOptions, config)
 	fmt.Printf("bazel %s\n", strings.Join(args, " "))
-	exitCode, err := runBazel(bazelPath, args, nil, config)
+	exitCode, err := runBazel(bazelPath, nil, config, nil, nil)
 	if err != nil {
 		log.Fatalf("could not run Bazel: %v", err)
 	}
@@ -902,7 +902,7 @@ func migrate(bazelPath string, baseArgs []string, flags []string, config config.
 	shutdownIfNeeded(bazelPath, startupOptions, config)
 	cleanIfNeeded(bazelPath, startupOptions, config)
 	fmt.Printf("bazel %s\n", strings.Join(args, " "))
-	exitCode, err = runBazel(bazelPath, args, nil, config)
+	exitCode, err = runBazel(bazelPath, args, config, nil, nil)
 	if err != nil {
 		log.Fatalf("could not run Bazel: %v", err)
 	}
@@ -920,7 +920,7 @@ func migrate(bazelPath string, baseArgs []string, flags []string, config config.
 		shutdownIfNeeded(bazelPath, startupOptions, config)
 		cleanIfNeeded(bazelPath, startupOptions, config)
 		fmt.Printf("bazel %s\n", strings.Join(args, " "))
-		exitCode, err = runBazel(bazelPath, args, nil, config)
+		exitCode, err = runBazel(bazelPath, args, config, nil, nil)
 		if err != nil {
 			log.Fatalf("could not run Bazel: %v", err)
 		}
