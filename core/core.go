@@ -76,11 +76,11 @@ func MakeDefaultConfig() config.Config {
 
 // RunBazelisk runs the main Bazelisk logic for the given ArgsFunc, Bazel
 // repositories and stdout/stderr.
-func RunBazelisk(argsFunc ArgsFunc, repos *Repositories) (int, string, string, error) {
+func RunBazelisk(argsFunc ArgsFunc, repos *Repositories, config config.Config) (int, string, string, error) {
 
 	var outb, errb bytes.Buffer
 
-	exitCode, err := RunBazeliskWithArgsFuncAndConfig(argsFunc, repos, MakeDefaultConfig(), &outb, &errb)
+	exitCode, err := runBazeliskWithArgsFuncAndConfig(argsFunc, repos, MakeDefaultConfig(), &outb, &errb)
 	if err != nil {
 		return exitCode, "", "", err
 	}
@@ -90,7 +90,7 @@ func RunBazelisk(argsFunc ArgsFunc, repos *Repositories) (int, string, string, e
 
 // RunBazeliskWithArgsFuncAndConfig runs the main Bazelisk logic for the given ArgsFunc and Bazel
 // repositories and config.
-func RunBazeliskWithArgsFuncAndConfig(argsFunc ArgsFunc, repos *Repositories, config config.Config, outb *bytes.Buffer, errb *bytes.Buffer) (int, error) {
+func runBazeliskWithArgsFuncAndConfig(argsFunc ArgsFunc, repos *Repositories, config config.Config, outb *bytes.Buffer, errb *bytes.Buffer) (int, error) {
 
 	userAgentOnce.Do(func() {
 		httputil.UserAgent = getUserAgent(config)
