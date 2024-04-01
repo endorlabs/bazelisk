@@ -85,7 +85,7 @@ func RunBazelisk(argsFunc ArgsFunc, repos *Repositories, config config.Config) (
 		return exitCode, "", "", err
 	}
 
-	return exitCode, outb.String(), errb.String(), err
+	return exitCode, outb.String(), errb.String(), nil
 }
 
 // RunBazeliskWithArgsFuncAndConfig runs the main Bazelisk logic for the given ArgsFunc and Bazel
