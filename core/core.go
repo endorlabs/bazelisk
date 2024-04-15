@@ -80,7 +80,7 @@ func RunBazelisk(argsFunc ArgsFunc, repos *Repositories, config config.Config) (
 
 	var outb, errb bytes.Buffer
 
-	exitCode, err := runBazeliskWithArgsFuncAndConfig(argsFunc, repos, MakeDefaultConfig(), &outb, &errb)
+	exitCode, err := runBazeliskWithArgsFuncAndConfig(argsFunc, repos, config, &outb, &errb)
 	if err != nil {
 		return exitCode, "", "", err
 	}
